@@ -77,9 +77,7 @@ class AskRequest(BaseModel):
 @app.get("/api/health")
 def health():
     return {
-        "status": "ok",
-        "ollama_connected": llm.check_connection(),
-        "ollama_model": config.OLLAMA_MODEL,
+        "status": "ok"
     }
 
 
