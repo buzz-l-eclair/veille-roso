@@ -1,0 +1,34 @@
+version: "3.9"
+
+# Ce fichier sert uniquement à tester l'app en local avec Docker avant de la
+# pousser sur Render. Render ne l'utilise pas : il build directement depuis
+# backend/Dockerfile (voir le README, section déploiement).
+services:
+  sentinel:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: sentinel-geoveille
+    restart: unless-stopped
+    ports:
+      - "8420:8420"
+    volumes:
+      - ./backend/app/feeds.py:/app/app/feeds.py   # édite la liste de flux sans rebuild
+    environment:
+      # --- Base de données Postgres (Neon) ---
+      - DATABASE_URL=${DATABASE_URL}
+
+      # --- LLM : API Gemini gratuite (https://aistudio.google.com/apikey) ---
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=gemini-2.5-flash
+      - GEMINI_MIN_INTERVAL_SECONDS=4
+
+      # --- Authentification (app exposée publiquement) ---
+      - SENTINEL_USERNAME=${SENTINEL_USERNAME:-admin}
+      - SENTINEL_PASSWORD=${SENTINEL_PASSWORD}
+
+      # --- Planification ---
+      - TIMEZONE=Europe/Paris
+      - BRIEFING_TIMES=07:00,19:00
+      - COLLECT_INTERVAL_MINUTES=30
+      - CLASSIFY_BATCH_SIZE=10
