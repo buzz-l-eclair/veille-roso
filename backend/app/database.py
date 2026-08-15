@@ -76,6 +76,18 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at)",
+    """
+    CREATE TABLE IF NOT EXISTS feed_runs (
+        id SERIAL PRIMARY KEY,
+        checked_at TEXT NOT NULL,
+        source TEXT NOT NULL,
+        status TEXT NOT NULL,
+        new_count INTEGER NOT NULL DEFAULT 0,
+        detail TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_feed_runs_source ON feed_runs(source)",
+    "CREATE INDEX IF NOT EXISTS idx_feed_runs_checked ON feed_runs(checked_at)",
 ]
 
 
@@ -317,5 +329,96 @@ def get_recent_alerts(limit=50):
     with contextlib.closing(get_conn()) as conn:
         rows = conn.execute(
             "SELECT * FROM alerts ORDER BY created_at DESC LIMIT %s", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ------------------------------------------------------------------ feed health
+
+def record_feed_run(source: str, status: str, new_count: int = 0, detail: str = None):
+    with contextlib.closing(get_conn()) as conn:
+        conn.execute(
+            """INSERT INTO feed_runs (checked_at, source, status, new_count, detail)
+               VALUES (%s, %s, %s, %s, %s)""",
+            (now_iso(), source, status, new_count, detail),
+        )
+        conn.commit()
+
+
+def get_feed_status():
+    """Renvoie le dernier statut connu de chaque flux (le plus récent en premier)."""
+    with contextlib.closing(get_conn()) as conn:
+        rows = conn.execute(
+            """SELECT DISTINCT ON (source) source, checked_at, status, new_count, detail
+               FROM feed_runs
+               ORDER BY source, checked_at DESC"""
+        ).fetchall()
+        rows = [dict(r) for r in rows]
+        rows.sort(key=lambda r: r["checked_at"], reverse=True)
+        return rows
+
+
+# ------------------------------------------------------------------ analytics / timeline
+
+def get_daily_stats(days: int = 14):
+    """Volume d'articles et tension moyenne par jour (toutes zones), pour les graphiques."""
+    since = _since_iso(days * 24)
+    with contextlib.closing(get_conn()) as conn:
+        rows = conn.execute(
+            """SELECT substring(fetched_at from 1 for 10) as day,
+                      COUNT(*) as n,
+                      AVG(tension_score) as avg_tension,
+                      MAX(tension_score) as max_tension
+               FROM articles
+               WHERE status='classified' AND fetched_at >= %s
+               GROUP BY day
+               ORDER BY day ASC""",
+            (since,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_daily_stats_by_zone(days: int = 14):
+    """Idem mais ventilé par zone, pour comparer les zones dans le temps."""
+    since = _since_iso(days * 24)
+    with contextlib.closing(get_conn()) as conn:
+        rows = conn.execute(
+            """SELECT substring(fetched_at from 1 for 10) as day, zone,
+                      COUNT(*) as n,
+                      AVG(tension_score) as avg_tension
+               FROM articles
+               WHERE status='classified' AND fetched_at >= %s
+               GROUP BY day, zone
+               ORDER BY day ASC""",
+            (since,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_theme_distribution(hours: int = 168):
+    since = _since_iso(hours)
+    with contextlib.closing(get_conn()) as conn:
+        rows = conn.execute(
+            """SELECT theme, COUNT(*) as n, AVG(tension_score) as avg_tension
+               FROM articles
+               WHERE status='classified' AND fetched_at >= %s
+               GROUP BY theme
+               ORDER BY n DESC""",
+            (since,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_source_distribution(hours: int = 168, limit: int = 20):
+    since = _since_iso(hours)
+    with contextlib.closing(get_conn()) as conn:
+        rows = conn.execute(
+            """SELECT source, COUNT(*) as n, AVG(tension_score) as avg_tension
+               FROM articles
+               WHERE status='classified' AND fetched_at >= %s
+               GROUP BY source
+               ORDER BY n DESC
+               LIMIT %s""",
+            (since, limit),
         ).fetchall()
         return [dict(r) for r in rows]

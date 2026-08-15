@@ -76,8 +76,15 @@ class AskRequest(BaseModel):
 
 @app.get("/api/health")
 def health():
+    db_ok = True
+    try:
+        db.get_stats()
+    except Exception:
+        db_ok = False
     return {
-        "status": "ok"
+        "status": "ok" if db_ok else "degraded",
+        "database_connected": db_ok,
+        "llm_configured": bool(config.GEMINI_API_KEY),
     }
 
 
@@ -94,12 +101,52 @@ def themes():
 @app.get("/api/feeds")
 def feeds():
     from .feeds import FEEDS
-    return [{"name": n, "url": u, "zone": z, "theme": t} for n, u, z, t in FEEDS]
+    return [
+        {"name": n, "url": u, "zone": z, "theme": t, "language": lang}
+        for n, u, z, t, lang in FEEDS
+    ]
+
+
+@app.get("/api/feeds/status")
+def feeds_status():
+    """Dernier statut connu de chaque flux (ok / erreur), pour repérer les flux cassés."""
+    from .feeds import FEEDS
+    known = {n: {"name": n, "zone": z, "theme": t} for n, u, z, t, lang in FEEDS}
+    runs = {r["source"]: r for r in db.get_feed_status()}
+    result = []
+    for name, meta in known.items():
+        run = runs.get(name)
+        result.append({
+            **meta,
+            "status": run["status"] if run else "jamais collecté",
+            "last_checked": run["checked_at"] if run else None,
+            "new_count": run["new_count"] if run else 0,
+            "detail": run["detail"] if run else None,
+        })
+    result.sort(key=lambda r: (r["status"] != "erreur", r["name"]))
+    return result
 
 
 @app.get("/api/stats")
 def stats():
     return db.get_stats()
+
+
+@app.get("/api/stats/timeline")
+def stats_timeline(days: int = 14, by_zone: bool = False):
+    if by_zone:
+        return db.get_daily_stats_by_zone(days=days)
+    return db.get_daily_stats(days=days)
+
+
+@app.get("/api/stats/themes")
+def stats_themes(hours: int = 168):
+    return db.get_theme_distribution(hours=hours)
+
+
+@app.get("/api/stats/sources")
+def stats_sources(hours: int = 168, limit: int = 20):
+    return db.get_source_distribution(hours=hours, limit=limit)
 
 
 # ---------------------------------------------------------------- articles

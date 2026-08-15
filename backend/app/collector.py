@@ -60,6 +60,10 @@ def collect_all() -> dict:
                 e,
             )
             summary[name] = "erreur"
+            try:
+                db.record_feed_run(name, "erreur", 0, str(e)[:500])
+            except Exception:
+                logger.exception("Impossible d'enregistrer le statut du flux %s", name)
             continue
 
         # Flux complètement illisible
@@ -70,6 +74,10 @@ def collect_all() -> dict:
                 url,
             )
             summary[name] = "erreur (flux illisible)"
+            try:
+                db.record_feed_run(name, "erreur", 0, "flux illisible ou vide")
+            except Exception:
+                logger.exception("Impossible d'enregistrer le statut du flux %s", name)
             continue
 
         entries = parsed.entries[:40]
@@ -114,6 +122,11 @@ def collect_all() -> dict:
 
         summary[name] = new_count
         total_new += new_count
+
+        try:
+            db.record_feed_run(name, "ok", new_count, f"{len(entries)} entrées lues")
+        except Exception:
+            logger.exception("Impossible d'enregistrer le statut du flux %s", name)
 
         logger.info(
             "Flux %-45s : %d nouveaux articles",
